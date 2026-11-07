@@ -228,7 +228,18 @@ jobs:
               fun uri(): Uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
           }
 
-          class Theme(val name: String, val bg: Int, val a1: Int, val a2: Int, val a3: Int)
+          class Theme(
+              val name: String,
+              val bg: Int,
+              val bg2: Int,
+              val a1: Int,
+              val a2: Int,
+              val a3: Int,
+              val light: Boolean,
+              val kanji: String
+          )
+
+          fun withAlpha(c: Int, a: Int): Int = (c and 0x00FFFFFF) or (a shl 24)
 
           fun hc(h: String): Int = Color.parseColor(h)
 
@@ -255,18 +266,23 @@ jobs:
               private var CARD_LINE = 0
               private var LIST_DIV = 0
               private var TRACK = 0
+              private var BG2 = 0
+              private var TEXT = 0
+              private var ON_ACCENT = 0
+              private var WATER = 0
+              private var KANJI = ""
 
               private val themes = listOf(
-                  Theme("Tsuki (padrão)", hc("#0B0B14"), hc("#E889B5"), hc("#8FD3E8"), hc("#B9AEE6")),
-                  Theme("Sakura noturno", hc("#120A12"), hc("#F2A7C3"), hc("#C9A6E4"), hc("#E6C6D8")),
-                  Theme("Oceano profundo", hc("#07111C"), hc("#5FB6E8"), hc("#7FE0D2"), hc("#A9C7E8")),
-                  Theme("Floresta matcha", hc("#0A1410"), hc("#7ED6A4"), hc("#D6E67F"), hc("#A8D5BE")),
-                  Theme("Pôr do sol", hc("#150B0E"), hc("#FF9E7A"), hc("#FFD27F"), hc("#F0B8A8")),
-                  Theme("Roxo meia-noite", hc("#0E0A1A"), hc("#B48CFF"), hc("#7FA8FF"), hc("#CDBDFF")),
-                  Theme("Vermelho samurai", hc("#100808"), hc("#E5484D"), hc("#E8B86A"), hc("#E8B0B0")),
-                  Theme("Grafite", hc("#0F0F11"), hc("#D0D0D8"), hc("#8E9AAF"), hc("#B8BCC8")),
-                  Theme("Ouro e ônix", hc("#0C0B08"), hc("#D9B25F"), hc("#E8D8A8"), hc("#CFC3A0")),
-                  Theme("Gelo", hc("#0A1016"), hc("#A8E0F5"), hc("#E0F4FF"), hc("#B8D4E8"))
+                  Theme("Tsuki (padrão)", hc("#0B0B14"), hc("#0B0B14"), hc("#E889B5"), hc("#8FD3E8"), hc("#B9AEE6"), false, "月"),
+                  Theme("Sakura (claro)", hc("#FBEFF3"), hc("#F3D7E3"), hc("#D6568A"), hc("#7A6AC9"), hc("#A04C78"), true, "桜"),
+                  Theme("Oceano", hc("#0F3557"), hc("#071B30"), hc("#5FC4F0"), hc("#7FE6D6"), hc("#A9D3EE"), false, "海"),
+                  Theme("Matcha (claro)", hc("#EEF4E6"), hc("#D9E8CB"), hc("#4F8A4B"), hc("#A8862F"), hc("#5E7F52"), true, "茶"),
+                  Theme("Pôr do sol", hc("#34163A"), hc("#8A3040"), hc("#FFB27A"), hc("#FFD98A"), hc("#FFCDB8"), false, "夕"),
+                  Theme("Roxo meia-noite", hc("#241A55"), hc("#0B0820"), hc("#B48CFF"), hc("#7FA8FF"), hc("#CDBDFF"), false, "夜"),
+                  Theme("Washi (claro)", hc("#F4EFE4"), hc("#E4DAC6"), hc("#B3262B"), hc("#2F4A6B"), hc("#6B5B45"), true, "刀"),
+                  Theme("Vermelho samurai", hc("#40101A"), hc("#14060A"), hc("#F0605F"), hc("#F0C078"), hc("#F0B8B8"), false, "武"),
+                  Theme("Café e ouro", hc("#3D2B1F"), hc("#1E140E"), hc("#E2B866"), hc("#F0DDB0"), hc("#D8C3A0"), false, "金"),
+                  Theme("Gelo (claro)", hc("#E9F4FB"), hc("#CFE4F2"), hc("#2C7DA6"), hc("#4A93B8"), hc("#3F6C8A"), true, "氷")
               )
 
               private var dragFrom = -1
@@ -316,7 +332,7 @@ jobs:
                       val cur = queue.getOrNull(index)
                       val playing = cur != null && p < shown.size && shown[p].id == cur.id
                       t1.text = (if (playing) "♪ " else "") + rows[p].first
-                      t1.setTextColor(if (playing) PINK else Color.WHITE)
+                      t1.setTextColor(if (playing) PINK else TEXT)
                       t1.maxLines = 1
                       t1.ellipsize = TextUtils.TruncateAt.END
                       view.setBackgroundColor(if (p == dragFrom) mix(BG, PINK, 0.28f) else Color.TRANSPARENT)
@@ -360,6 +376,10 @@ jobs:
                   super.onCreate(b)
                   prefs = getSharedPreferences("tsuki", MODE_PRIVATE)
                   applyTheme(prefs.getInt("theme", 0))
+                  try {
+                      filesDir.listFiles()?.forEach { if (it.name.startsWith("art_")) it.delete() }
+                  } catch (e: Exception) {
+                  }
                   buildUi()
                   handler.post(ticker)
                   val perm = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
@@ -386,23 +406,44 @@ jobs:
 
               // ---------- temas ----------
 
+              @Suppress("DEPRECATION")
               private fun applyTheme(i: Int) {
                   val t = themes[if (i in themes.indices) i else 0]
                   BG = t.bg
+                  BG2 = t.bg2
                   PINK = t.a1
                   CYAN = t.a2
                   LILAC = t.a3
-                  PANEL = mix(t.bg, Color.WHITE, 0.08f)
-                  PANEL2 = mix(t.bg, Color.WHITE, 0.03f)
-                  GRAY = mix(t.bg, Color.WHITE, 0.5f)
-                  LINE = mix(t.bg, t.a1, 0.45f)
-                  CARD1 = mix(t.bg, Color.WHITE, 0.06f)
-                  CARD2 = mix(t.bg, Color.WHITE, 0.02f)
-                  CARD_LINE = mix(t.bg, t.a2, 0.25f)
-                  LIST_DIV = mix(t.bg, Color.WHITE, 0.08f)
-                  TRACK = mix(t.bg, Color.WHITE, 0.22f)
-                  window.statusBarColor = BG
-                  window.navigationBarColor = BG
+                  KANJI = t.kanji
+                  val fg = if (t.light) hc("#231F33") else Color.WHITE
+                  TEXT = fg
+                  if (t.light) {
+                      PANEL = mix(t.bg, Color.WHITE, 0.6f)
+                      PANEL2 = mix(t.bg, Color.WHITE, 0.35f)
+                      CARD1 = withAlpha(mix(t.bg, Color.WHITE, 0.65f), 235)
+                      CARD2 = withAlpha(mix(t.bg, Color.WHITE, 0.4f), 235)
+                      CARD_LINE = mix(t.bg, t.a2, 0.4f)
+                      LIST_DIV = mix(t.bg, fg, 0.12f)
+                      TRACK = mix(t.bg, fg, 0.2f)
+                      GRAY = mix(t.bg, fg, 0.6f)
+                      WATER = mix(t.bg, t.a1, 0.16f)
+                  } else {
+                      PANEL = mix(t.bg, Color.WHITE, 0.09f)
+                      PANEL2 = mix(t.bg, Color.WHITE, 0.03f)
+                      CARD1 = withAlpha(mix(t.bg, Color.WHITE, 0.07f), 235)
+                      CARD2 = withAlpha(mix(t.bg2, Color.WHITE, 0.03f), 235)
+                      CARD_LINE = mix(t.bg, t.a2, 0.28f)
+                      LIST_DIV = mix(t.bg, Color.WHITE, 0.09f)
+                      TRACK = mix(t.bg, Color.WHITE, 0.24f)
+                      GRAY = mix(t.bg, Color.WHITE, 0.55f)
+                      WATER = mix(t.bg, t.a1, 0.13f)
+                  }
+                  LINE = mix(t.bg, t.a1, 0.5f)
+                  ON_ACCENT = if (Color.luminance(t.a1) > 0.5f) hc("#14121F") else Color.WHITE
+                  window.statusBarColor = t.bg
+                  window.navigationBarColor = t.bg2
+                  window.decorView.systemUiVisibility =
+                      if (t.light) (View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR) else 0
               }
 
               private fun showThemesDialog() {
@@ -504,7 +545,7 @@ jobs:
                   val b = TextView(this)
                   b.text = label
                   b.textSize = size
-                  b.setTextColor(Color.WHITE)
+                  b.setTextColor(TEXT)
                   b.typeface = Typeface.DEFAULT_BOLD
                   b.gravity = Gravity.CENTER
                   b.includeFontPadding = false
@@ -524,7 +565,6 @@ jobs:
               private fun buildUi() {
                   val root = LinearLayout(this)
                   root.orientation = LinearLayout.VERTICAL
-                  root.setBackgroundColor(BG)
                   root.clipToPadding = false
                   root.clipChildren = false
                   root.setPadding(dp(14), dp(10), dp(14), dp(26))
@@ -564,6 +604,25 @@ jobs:
                   }
                   art.clipToOutline = true
                   frame.addView(art, FrameLayout.LayoutParams(MATCH, MATCH))
+                  frame.setOnLongClickListener {
+                      val cs = queue.getOrNull(index)
+                      if (cs != null) {
+                          AlertDialog.Builder(this)
+                              .setTitle("Capa do álbum")
+                              .setMessage("Apagar as capas guardadas e buscar de novo na internet?")
+                              .setPositiveButton("Buscar") { _, _ ->
+                                  try {
+                                      filesDir.listFiles()?.forEach { if (it.name.startsWith("art2_")) it.delete() }
+                                  } catch (e: Exception) {
+                                  }
+                                  noArt.clear()
+                                  loadMeta(cs)
+                              }
+                              .setNegativeButton("Cancelar", null)
+                              .show()
+                      }
+                      true
+                  }
                   val flp = LinearLayout.LayoutParams(side, side)
                   flp.gravity = Gravity.CENTER_HORIZONTAL
                   flp.topMargin = dp(8)
@@ -573,7 +632,7 @@ jobs:
 
                   titleTv = TextView(this)
                   titleTv.text = "Nenhuma música"
-                  titleTv.setTextColor(Color.WHITE)
+                  titleTv.setTextColor(TEXT)
                   titleTv.textSize = 19f
                   titleTv.typeface = Typeface.DEFAULT_BOLD
                   titleTv.gravity = Gravity.CENTER
@@ -718,7 +777,7 @@ jobs:
                   val pg = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(PINK, CYAN))
                   pg.cornerRadius = dp(16).toFloat()
                   playBtn.background = pg
-                  playBtn.setTextColor(BG)
+                  playBtn.setTextColor(ON_ACCENT)
                   add(playBtn)
                   add(btn("10s»", 14f) { seekRel(10000) })
                   add(btn("▶|", 17f) { next() })
@@ -726,7 +785,19 @@ jobs:
                   clp.topMargin = dp(6)
                   root.addView(ctr, clp)
 
-                  setContentView(root)
+                  val wrap = FrameLayout(this)
+                  wrap.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(BG, BG2))
+                  val wm = TextView(this)
+                  wm.text = KANJI
+                  wm.textSize = 280f
+                  wm.includeFontPadding = false
+                  wm.setTextColor(WATER)
+                  val wlp = FrameLayout.LayoutParams(WRAP, WRAP)
+                  wlp.gravity = Gravity.BOTTOM or Gravity.END
+                  wlp.setMargins(0, 0, dp(-24), dp(96))
+                  wrap.addView(wm, wlp)
+                  wrap.addView(root, FrameLayout.LayoutParams(MATCH, MATCH))
+                  setContentView(wrap)
               }
 
               // ---------- biblioteca ----------
@@ -1107,11 +1178,17 @@ jobs:
                       var bmp: Bitmap? = null
                       var detail = ""
                       var trk = ""
+                      var albumTag = ""
+                      var aaTag = ""
+                      var artistTag = ""
                       try {
                           val r = MediaMetadataRetriever()
                           r.setDataSource(applicationContext, uri)
                           val parts = ArrayList<String>()
                           val aa = tag(r, MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST)
+                          aaTag = aa
+                          albumTag = tag(r, MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                          artistTag = tag(r, MediaMetadataRetriever.METADATA_KEY_ARTIST)
                           if (aa.isNotEmpty() && aa != s.artist) parts.add("Álbum de " + aa)
                           val genre = tag(r, MediaMetadataRetriever.METADATA_KEY_GENRE)
                           if (genre.isNotEmpty()) parts.add(genre)
@@ -1154,7 +1231,7 @@ jobs:
                           } catch (e: Exception) {
                           }
                       }
-                      if (bmp == null) bmp = fetchWebArt(s)
+                      if (bmp == null) bmp = fetchWebArt(s, trk, albumTag, aaTag, artistTag)
                       val result = bmp
                       val det = detail
                       val tt = cleanTitle(s.title, trk)
@@ -1203,35 +1280,161 @@ jobs:
                   }
               }
 
-              // busca a capa na internet (iTunes) quando o arquivo não tem; guarda no celular
-              private fun fetchWebArt(s: Song): Bitmap? {
+              // ---------- capa pela internet (com conferência) ----------
+
+              private fun norm(x: String): String {
+                  var t = java.text.Normalizer.normalize(x, java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+                  t = t.lowercase().replace("&", " and ")
+                  t = t.replace(Regex("[\\(\\[].*?[\\)\\]]"), " ")
+                  val toks = ArrayList<String>()
+                  for (w in t.split(Regex("[^a-z0-9]+"))) {
+                      if (w.isEmpty()) continue
+                      toks.add(
+                          when (w) {
+                              "ii" -> "2"
+                              "iii" -> "3"
+                              "iv" -> "4"
+                              else -> w
+                          }
+                      )
+                  }
+                  return toks.joinToString(" ")
+              }
+
+              // dois nomes são "o mesmo"? (números precisam coincidir: "Illusion" ≠ "Illusion 2")
+              private fun sim(a: String, b: String): Boolean {
+                  val na = norm(a)
+                  val nb = norm(b)
+                  if (na.isEmpty() || nb.isEmpty()) return false
+                  if (na == nb) return true
+                  val ta = na.split(" ").toSet()
+                  val tb = nb.split(" ").toSet()
+                  val da = ta.filter { w -> w.all { c -> c.isDigit() } }.toSet()
+                  val db = tb.filter { w -> w.all { c -> c.isDigit() } }.toSet()
+                  if (da != db) return false
+                  if (ta.containsAll(tb) || tb.containsAll(ta)) return Math.min(ta.size, tb.size) >= 2
+                  val inter = ta.intersect(tb).size
+                  val uni = ta.union(tb).size
+                  return uni > 0 && inter.toFloat() / uni >= 0.75f
+              }
+
+              private fun parts(a: String): List<String> {
+                  val res = ArrayList<String>()
+                  if (a.isBlank()) return res
+                  res.add(a.trim())
+                  for (p in a.split(Regex("(?i)\\s+(feat\\.?|ft\\.?|featuring|with|vs\\.?)\\s+|\\s*[,;/]\\s*"))) {
+                      if (p.isNotBlank() && res.none { it.equals(p.trim(), true) }) res.add(p.trim())
+                  }
+                  return res
+              }
+
+              private fun artistOk(found: String, artists: List<String>): Boolean {
+                  for (p in parts(found)) for (c in artists) if (sim(p, c)) return true
+                  return false
+              }
+
+              private fun itunes(term: String, entity: String, limit: Int, country: String): JSONArray? {
+                  val url = "https://itunes.apple.com/search?media=music&limit=" + limit + "&entity=" + entity +
+                      "&country=" + country + "&term=" + URLEncoder.encode(term, "UTF-8")
+                  val txt = httpBytes(url)?.toString(Charsets.UTF_8) ?: return null
+                  return try {
+                      JSONObject(txt).optJSONArray("results")
+                  } catch (e: Exception) {
+                      null
+                  }
+              }
+
+              // procura a capa só se artista, álbum e música "baterem" com o resultado; sem certeza, não mostra capa
+              private fun fetchWebArt(s: Song, trk: String, albumTag: String, aaTag: String, artistTag: String): Bitmap? {
                   try {
-                      val key = (if (s.album.isNotBlank()) s.artist + "|" + s.album else "id" + s.id).hashCode().toString()
-                      val f = File(filesDir, "art_" + key + ".img")
+                      val artists = ArrayList<String>()
+                      for (x in listOf(s.artist, artistTag, aaTag)) {
+                          if (x.isNotBlank() && x != "Artista desconhecido") {
+                              for (p in parts(x)) if (artists.none { it.equals(p, true) }) artists.add(p)
+                          }
+                      }
+                      val albums = ArrayList<String>()
+                      fun addAlbum(x: String) {
+                          var t = x.replace(Regex("[\\(\\[]\\s*(19|20)\\d{2}\\s*[\\)\\]]"), "").trim()
+                          t = t.replace(Regex("^(19|20)\\d{2}\\s*[-–.]\\s*"), "").trim()
+                          if (t.length >= 2 && t.lowercase() != "unknown" && albums.none { it.equals(t, true) }) albums.add(t)
+                      }
+                      addAlbum(s.album)
+                      addAlbum(albumTag)
+                      val folder = File(s.path).parentFile?.name ?: ""
+                      val generic = setOf("music", "musicas", "músicas", "download", "downloads", "audio", "media", "songs", "0", "sdcard", "storage", "emulated")
+                      if (folder.isNotBlank() && !generic.contains(folder.lowercase()) && !artists.any { sim(folder, it) }) {
+                          addAlbum(folder)
+                          if (folder.contains(" - ")) {
+                              for (piece in folder.split(" - ")) if (!artists.any { sim(piece, it) }) addAlbum(piece)
+                          }
+                      }
+                      val title = cleanTitle(s.title, trk)
+                      if (artists.isEmpty() && albums.isEmpty()) return null
+
+                      val key = (norm(artists.firstOrNull() ?: "") + "|" + (if (albums.isNotEmpty()) norm(albums[0]) else "id" + s.id)).hashCode().toString()
+                      val f = File(filesDir, "art2_" + key + ".img")
                       if (f.exists()) {
                           val cached = BitmapFactory.decodeFile(f.absolutePath)
                           if (cached != null) return cached
                       }
                       if (noArt.contains(key)) return null
-                      val unknown = s.artist == "Artista desconhecido"
-                      val terms = ArrayList<String>()
-                      if (s.album.isNotBlank()) terms.add((if (unknown) "" else s.artist + " ") + s.album + "|album")
-                      if (!unknown) terms.add(s.artist + " " + cleanTitle(s.title, "") + "|song")
-                      for (t in terms) {
-                          val q = t.substringBeforeLast('|')
-                          val ent = t.substringAfterLast('|')
-                          val url = "https://itunes.apple.com/search?media=music&limit=1&entity=" + ent + "&term=" + URLEncoder.encode(q, "UTF-8")
-                          val txt = httpBytes(url)?.toString(Charsets.UTF_8) ?: continue
-                          val arr = JSONObject(txt).optJSONArray("results") ?: continue
-                          if (arr.length() == 0) continue
-                          val au = arr.getJSONObject(0).optString("artworkUrl100", "")
-                          if (au.isEmpty()) continue
-                          val bytes = httpBytes(au.replace("100x100bb", "600x600bb")) ?: continue
-                          val bm = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: continue
-                          f.writeBytes(bytes)
-                          return bm
+
+                      var artUrl = ""
+                      for (country in listOf("US", "BR")) {
+                          // 1) artista + álbum
+                          if (artUrl.isEmpty() && artists.isNotEmpty() && albums.isNotEmpty()) {
+                              for (al in albums.take(3)) {
+                                  val arr = itunes(artists[0] + " " + al, "album", 10, country) ?: continue
+                                  for (i in 0 until arr.length()) {
+                                      val o = arr.getJSONObject(i)
+                                      if (artistOk(o.optString("artistName"), artists) && sim(o.optString("collectionName"), al)) {
+                                          artUrl = o.optString("artworkUrl100", "")
+                                          if (artUrl.isNotEmpty()) break
+                                      }
+                                  }
+                                  if (artUrl.isNotEmpty()) break
+                              }
+                          }
+                          // 2) artista + música (e o álbum, se a gente souber qual é)
+                          if (artUrl.isEmpty() && artists.isNotEmpty() && title.isNotBlank()) {
+                              val arr = itunes(artists[0] + " " + title, "song", 15, country)
+                              if (arr != null) {
+                                  for (i in 0 until arr.length()) {
+                                      val o = arr.getJSONObject(i)
+                                      if (!artistOk(o.optString("artistName"), artists)) continue
+                                      if (!sim(o.optString("trackName"), title)) continue
+                                      if (albums.isNotEmpty() && !albums.any { sim(o.optString("collectionName"), it) }) continue
+                                      artUrl = o.optString("artworkUrl100", "")
+                                      if (artUrl.isNotEmpty()) break
+                                  }
+                              }
+                          }
+                          // 3) álbum + música (sem exigir o artista, se ele for desconhecido)
+                          if (artUrl.isEmpty() && albums.isNotEmpty() && title.isNotBlank()) {
+                              for (al in albums.take(3)) {
+                                  val arr = itunes(al + " " + title, "song", 15, country) ?: continue
+                                  for (i in 0 until arr.length()) {
+                                      val o = arr.getJSONObject(i)
+                                      if (!sim(o.optString("collectionName"), al)) continue
+                                      if (!sim(o.optString("trackName"), title)) continue
+                                      if (artists.isNotEmpty() && !artistOk(o.optString("artistName"), artists)) continue
+                                      artUrl = o.optString("artworkUrl100", "")
+                                      if (artUrl.isNotEmpty()) break
+                                  }
+                                  if (artUrl.isNotEmpty()) break
+                              }
+                          }
+                          if (artUrl.isNotEmpty()) break
                       }
-                      noArt.add(key)
+                      if (artUrl.isEmpty()) {
+                          noArt.add(key)
+                          return null
+                      }
+                      val bytes = httpBytes(artUrl.replace("100x100bb", "600x600bb")) ?: httpBytes(artUrl) ?: return null
+                      val bm = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+                      f.writeBytes(bytes)
+                      return bm
                   } catch (e: Exception) {
                   }
                   return null
