@@ -1,0 +1,793 @@
+name: Gerar APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Criar projeto Android
+        run: |
+          mkdir -p app/src/main/java/br/dev/rf/tsuki
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "TsukiPlayer"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx3g
+          android.nonTransitiveRClass=true
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "br.dev.rf.tsuki"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "br.dev.rf.tsuki"
+                  minSdk = 29
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <application
+                  android:label="Tsuki Player"
+                  android:theme="@android:style/Theme.Material.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="portrait"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/br/dev/rf/tsuki/MainActivity.kt <<'EOF'
+          package br.dev.rf.tsuki
+
+          import android.Manifest
+          import android.app.Activity
+          import android.app.AlertDialog
+          import android.content.ContentUris
+          import android.content.SharedPreferences
+          import android.content.pm.PackageManager
+          import android.content.res.ColorStateList
+          import android.graphics.Bitmap
+          import android.graphics.BitmapFactory
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.graphics.drawable.ColorDrawable
+          import android.graphics.drawable.GradientDrawable
+          import android.media.MediaMetadataRetriever
+          import android.media.MediaPlayer
+          import android.net.Uri
+          import android.os.Build
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.os.PowerManager
+          import android.provider.MediaStore
+          import android.text.TextUtils
+          import android.util.Size
+          import android.view.Gravity
+          import android.view.View
+          import android.view.ViewGroup
+          import android.widget.BaseAdapter
+          import android.widget.Button
+          import android.widget.EditText
+          import android.widget.FrameLayout
+          import android.widget.ImageView
+          import android.widget.LinearLayout
+          import android.widget.ListView
+          import android.widget.SeekBar
+          import android.widget.TextView
+          import android.widget.Toast
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.io.File
+
+          data class Song(
+              val id: Long,
+              val title: String,
+              val artist: String,
+              val album: String,
+              val dur: Long,
+              val path: String
+          ) {
+              fun uri(): Uri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+          }
+
+          class MainActivity : Activity() {
+              private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+              private val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
+              private val PINK = Color.parseColor("#FF5FA8")
+              private val CYAN = Color.parseColor("#5FE3FF")
+              private val BG = Color.parseColor("#0B0B14")
+              private val PANEL = Color.parseColor("#17172A")
+              private val LILAC = Color.parseColor("#B9A7FF")
+
+              private val allSongs = ArrayList<Song>()
+              private var shown = ArrayList<Song>()
+              private var queue = ArrayList<Song>()
+              private var index = -1
+              private var mode = 0
+              private var curPl = ""
+              private val plNames = ArrayList<String>()
+              private val rows = ArrayList<Pair<String, String>>()
+              private var mp: MediaPlayer? = null
+              private var dragging = false
+              private val handler = Handler(Looper.getMainLooper())
+
+              private lateinit var prefs: SharedPreferences
+              private lateinit var art: ImageView
+              private lateinit var titleTv: TextView
+              private lateinit var artistTv: TextView
+              private lateinit var curTv: TextView
+              private lateinit var durTv: TextView
+              private lateinit var seek: SeekBar
+              private lateinit var playBtn: Button
+              private lateinit var sectionTv: TextView
+              private lateinit var newPlBtn: Button
+              private lateinit var list: ListView
+
+              private val adapter = object : BaseAdapter() {
+                  override fun getCount(): Int = rows.size
+                  override fun getItem(p: Int): Any = rows[p]
+                  override fun getItemId(p: Int): Long = p.toLong()
+                  override fun getView(p: Int, v: View?, parent: ViewGroup?): View {
+                      val view = v ?: layoutInflater.inflate(android.R.layout.simple_list_item_2, parent, false)
+                      val t1 = view.findViewById<TextView>(android.R.id.text1)
+                      val t2 = view.findViewById<TextView>(android.R.id.text2)
+                      t1.text = rows[p].first
+                      t1.setTextColor(Color.WHITE)
+                      t1.maxLines = 1
+                      t1.ellipsize = TextUtils.TruncateAt.END
+                      t2.text = rows[p].second
+                      t2.setTextColor(LILAC)
+                      t2.maxLines = 1
+                      t2.ellipsize = TextUtils.TruncateAt.END
+                      return view
+                  }
+              }
+
+              private val ticker = object : Runnable {
+                  override fun run() {
+                      val m = mp
+                      if (m != null && !dragging) {
+                          try {
+                              if (m.isPlaying) {
+                                  seek.progress = m.currentPosition
+                                  curTv.text = fmt(m.currentPosition)
+                              }
+                          } catch (e: Exception) {
+                          }
+                      }
+                      handler.postDelayed(this, 500)
+                  }
+              }
+
+              override fun onCreate(b: Bundle?) {
+                  super.onCreate(b)
+                  prefs = getSharedPreferences("tsuki", MODE_PRIVATE)
+                  window.statusBarColor = BG
+                  window.navigationBarColor = BG
+                  buildUi()
+                  handler.post(ticker)
+                  val perm = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+                  if (checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED) loadSongs() else requestPermissions(arrayOf(perm), 1)
+              }
+
+              override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, res: IntArray) {
+                  super.onRequestPermissionsResult(code, perms, res)
+                  if (res.isNotEmpty() && res[0] == PackageManager.PERMISSION_GRANTED) loadSongs()
+                  else toast("Permita o acesso às músicas para usar o app")
+              }
+
+              override fun onDestroy() {
+                  handler.removeCallbacks(ticker)
+                  mp?.release()
+                  mp = null
+                  super.onDestroy()
+              }
+
+              @Suppress("DEPRECATION")
+              override fun onBackPressed() {
+                  if (mode == 2) showPlaylists() else super.onBackPressed()
+              }
+
+              // ---------- utilidades ----------
+
+              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+              private fun toast(m: String) {
+                  Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
+              }
+
+              private fun fmt(ms: Int): String {
+                  val t = ms / 1000
+                  return String.format("%d:%02d", t / 60, t % 60)
+              }
+
+              private fun box(color: Int, stroke: Int, radius: Int): GradientDrawable {
+                  val g = GradientDrawable()
+                  g.setColor(color)
+                  g.cornerRadius = dp(radius).toFloat()
+                  g.setStroke(dp(2), stroke)
+                  return g
+              }
+
+              private fun btn(label: String, size: Float, click: () -> Unit): Button {
+                  val b = Button(this)
+                  b.text = label
+                  b.textSize = size
+                  b.isAllCaps = false
+                  b.setTextColor(Color.WHITE)
+                  b.background = box(PANEL, PINK, 16)
+                  b.stateListAnimator = null
+                  b.minWidth = 0
+                  b.minimumWidth = 0
+                  b.minHeight = 0
+                  b.minimumHeight = 0
+                  b.setPadding(dp(4), 0, dp(4), 0)
+                  b.setOnClickListener { click() }
+                  return b
+              }
+
+              // ---------- interface ----------
+
+              private fun buildUi() {
+                  val root = LinearLayout(this)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.setBackgroundColor(BG)
+                  root.setPadding(dp(14), dp(12), dp(14), dp(10))
+
+                  val head = TextView(this)
+                  head.text = "✦ ツキ・プレイヤー ✦"
+                  head.setTextColor(PINK)
+                  head.textSize = 18f
+                  head.typeface = Typeface.DEFAULT_BOLD
+                  head.gravity = Gravity.CENTER
+                  root.addView(head, LinearLayout.LayoutParams(MATCH, WRAP))
+
+                  val side = (resources.displayMetrics.widthPixels * 0.60).toInt()
+                  val frame = FrameLayout(this)
+                  frame.background = box(PANEL, CYAN, 22)
+                  frame.setPadding(dp(5), dp(5), dp(5), dp(5))
+                  val note = TextView(this)
+                  note.text = "♪"
+                  note.textSize = 72f
+                  note.setTextColor(PINK)
+                  note.gravity = Gravity.CENTER
+                  frame.addView(note, FrameLayout.LayoutParams(MATCH, MATCH))
+                  art = ImageView(this)
+                  art.scaleType = ImageView.ScaleType.CENTER_CROP
+                  frame.addView(art, FrameLayout.LayoutParams(MATCH, MATCH))
+                  val flp = LinearLayout.LayoutParams(side, side)
+                  flp.gravity = Gravity.CENTER_HORIZONTAL
+                  flp.topMargin = dp(10)
+                  root.addView(frame, flp)
+
+                  titleTv = TextView(this)
+                  titleTv.text = "Nenhuma música"
+                  titleTv.setTextColor(Color.WHITE)
+                  titleTv.textSize = 20f
+                  titleTv.typeface = Typeface.DEFAULT_BOLD
+                  titleTv.gravity = Gravity.CENTER
+                  titleTv.maxLines = 1
+                  titleTv.ellipsize = TextUtils.TruncateAt.END
+                  val tlp = LinearLayout.LayoutParams(MATCH, WRAP)
+                  tlp.topMargin = dp(10)
+                  root.addView(titleTv, tlp)
+
+                  artistTv = TextView(this)
+                  artistTv.text = "Toque em uma música da lista"
+                  artistTv.setTextColor(LILAC)
+                  artistTv.textSize = 14f
+                  artistTv.gravity = Gravity.CENTER
+                  artistTv.maxLines = 1
+                  artistTv.ellipsize = TextUtils.TruncateAt.END
+                  root.addView(artistTv, LinearLayout.LayoutParams(MATCH, WRAP))
+
+                  seek = SeekBar(this)
+                  seek.progressTintList = ColorStateList.valueOf(PINK)
+                  seek.thumbTintList = ColorStateList.valueOf(CYAN)
+                  seek.progressBackgroundTintList = ColorStateList.valueOf(Color.parseColor("#3A3A55"))
+                  seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                      override fun onProgressChanged(s: SeekBar?, p: Int, user: Boolean) {
+                          if (user) curTv.text = fmt(p)
+                      }
+
+                      override fun onStartTrackingTouch(s: SeekBar?) {
+                          dragging = true
+                      }
+
+                      override fun onStopTrackingTouch(s: SeekBar?) {
+                          dragging = false
+                          mp?.seekTo(seek.progress)
+                      }
+                  })
+                  root.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP))
+
+                  val times = LinearLayout(this)
+                  times.orientation = LinearLayout.HORIZONTAL
+                  curTv = TextView(this)
+                  curTv.text = "0:00"
+                  curTv.setTextColor(CYAN)
+                  durTv = TextView(this)
+                  durTv.text = "0:00"
+                  durTv.setTextColor(CYAN)
+                  durTv.gravity = Gravity.END
+                  times.addView(curTv, LinearLayout.LayoutParams(0, WRAP, 1f))
+                  times.addView(durTv, LinearLayout.LayoutParams(0, WRAP, 1f))
+                  root.addView(times, LinearLayout.LayoutParams(MATCH, WRAP))
+
+                  val ctr = LinearLayout(this)
+                  ctr.orientation = LinearLayout.HORIZONTAL
+                  fun add(b: Button) {
+                      val lp = LinearLayout.LayoutParams(0, dp(54), 1f)
+                      lp.setMargins(dp(3), 0, dp(3), 0)
+                      ctr.addView(b, lp)
+                  }
+                  add(btn("|◀", 16f) { prev() })
+                  add(btn("«10s", 13f) { seekRel(-10000) })
+                  playBtn = btn("▶", 20f) { toggle() }
+                  add(playBtn)
+                  add(btn("10s»", 13f) { seekRel(10000) })
+                  add(btn("▶|", 16f) { next() })
+                  val clp = LinearLayout.LayoutParams(MATCH, WRAP)
+                  clp.topMargin = dp(8)
+                  root.addView(ctr, clp)
+
+                  val tabs = LinearLayout(this)
+                  tabs.orientation = LinearLayout.HORIZONTAL
+                  fun tab(b: Button) {
+                      val lp = LinearLayout.LayoutParams(0, dp(42), 1f)
+                      lp.setMargins(dp(3), 0, dp(3), 0)
+                      tabs.addView(b, lp)
+                  }
+                  tab(btn("Músicas", 14f) { showSongs() })
+                  tab(btn("Playlists", 14f) { showPlaylists() })
+                  tab(btn("Pastas", 14f) { chooseFolders() })
+                  val tablp = LinearLayout.LayoutParams(MATCH, WRAP)
+                  tablp.topMargin = dp(12)
+                  root.addView(tabs, tablp)
+
+                  val sec = LinearLayout(this)
+                  sec.orientation = LinearLayout.HORIZONTAL
+                  sec.gravity = Gravity.CENTER_VERTICAL
+                  sectionTv = TextView(this)
+                  sectionTv.setTextColor(PINK)
+                  sectionTv.typeface = Typeface.DEFAULT_BOLD
+                  sec.addView(sectionTv, LinearLayout.LayoutParams(0, WRAP, 1f))
+                  newPlBtn = btn("＋ Playlist", 13f) { newPlaylist(null) }
+                  newPlBtn.visibility = View.GONE
+                  sec.addView(newPlBtn, LinearLayout.LayoutParams(WRAP, dp(36)))
+                  val seclp = LinearLayout.LayoutParams(MATCH, WRAP)
+                  seclp.topMargin = dp(10)
+                  root.addView(sec, seclp)
+
+                  list = ListView(this)
+                  list.adapter = adapter
+                  list.divider = ColorDrawable(Color.parseColor("#26263D"))
+                  list.dividerHeight = 1
+                  list.setOnItemClickListener { _, _, p, _ -> onItem(p) }
+                  list.setOnItemLongClickListener { _, _, p, _ ->
+                      onItemLong(p)
+                      true
+                  }
+                  val llp = LinearLayout.LayoutParams(MATCH, 0, 1f)
+                  llp.topMargin = dp(4)
+                  root.addView(list, llp)
+
+                  setContentView(root)
+              }
+
+              // ---------- biblioteca ----------
+
+              private fun loadSongs() {
+                  allSongs.clear()
+                  val proj = arrayOf(
+                      MediaStore.Audio.Media._ID,
+                      MediaStore.Audio.Media.TITLE,
+                      MediaStore.Audio.Media.ARTIST,
+                      MediaStore.Audio.Media.ALBUM,
+                      MediaStore.Audio.Media.DURATION,
+                      MediaStore.Audio.Media.DATA
+                  )
+                  val sel = MediaStore.Audio.Media.IS_MUSIC + " != 0 AND " + MediaStore.Audio.Media.DURATION + " >= 20000"
+                  try {
+                      contentResolver.query(
+                          MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, proj, sel, null,
+                          MediaStore.Audio.Media.TITLE + " COLLATE NOCASE ASC"
+                      )?.use { c ->
+                          while (c.moveToNext()) {
+                              var artist = c.getString(2) ?: ""
+                              if (artist.isBlank() || artist == "<unknown>") artist = "Artista desconhecido"
+                              var album = c.getString(3) ?: ""
+                              if (album == "<unknown>") album = ""
+                              allSongs.add(
+                                  Song(
+                                      c.getLong(0),
+                                      c.getString(1) ?: "Sem título",
+                                      artist,
+                                      album,
+                                      c.getLong(4),
+                                      c.getString(5) ?: ""
+                                  )
+                              )
+                          }
+                      }
+                  } catch (e: Exception) {
+                      toast("Erro ao ler as músicas")
+                  }
+                  showSongs()
+              }
+
+              private fun enabledSongs(): List<Song> {
+                  val f: Set<String> = prefs.getStringSet("folders", null)?.toSet() ?: emptySet()
+                  return if (f.isEmpty()) allSongs else allSongs.filter { f.contains(File(it.path).parent ?: "") }
+              }
+
+              private fun chooseFolders() {
+                  val folders = allSongs.map { File(it.path).parent ?: "" }.distinct().sorted()
+                  if (folders.isEmpty()) {
+                      toast("Nenhuma música encontrada")
+                      return
+                  }
+                  val cur: Set<String> = prefs.getStringSet("folders", null)?.toSet() ?: emptySet()
+                  val checked = BooleanArray(folders.size) { cur.isEmpty() || cur.contains(folders[it]) }
+                  val names = folders.map { it.removePrefix("/storage/emulated/0/").ifEmpty { "(raiz)" } }.toTypedArray()
+                  AlertDialog.Builder(this)
+                      .setTitle("Pastas de música")
+                      .setMultiChoiceItems(names, checked) { _, i, v -> checked[i] = v }
+                      .setPositiveButton("OK") { _, _ ->
+                          val sel = HashSet<String>()
+                          for (i in folders.indices) if (checked[i]) sel.add(folders[i])
+                          if (sel.isEmpty()) {
+                              toast("Escolha ao menos uma pasta")
+                          } else {
+                              val save = if (sel.size == folders.size) HashSet<String>() else sel
+                              prefs.edit().putStringSet("folders", save).apply()
+                              showSongs()
+                          }
+                      }
+                      .setNegativeButton("Cancelar", null)
+                      .show()
+              }
+
+              private fun showSongs() {
+                  mode = 0
+                  shown = ArrayList(enabledSongs())
+                  refresh()
+              }
+
+              private fun showPlaylists() {
+                  mode = 1
+                  refresh()
+              }
+
+              private fun openPlaylist(name: String) {
+                  mode = 2
+                  curPl = name
+                  shown = ArrayList(plSongs(name))
+                  refresh()
+              }
+
+              private fun refresh() {
+                  rows.clear()
+                  if (mode == 1) {
+                      plNames.clear()
+                      plNames.addAll(loadPl().keys().asSequence().sorted())
+                      for (n in plNames) rows.add(Pair("♫ " + n, plSongs(n).size.toString() + " músicas"))
+                      sectionTv.text = "Playlists"
+                  } else {
+                      for (s in shown) rows.add(Pair(s.title, s.artist + "  •  " + fmt(s.dur.toInt())))
+                      sectionTv.text = if (mode == 0) "Músicas (" + shown.size + ")" else "♫ " + curPl + " (" + shown.size + ")"
+                  }
+                  newPlBtn.visibility = if (mode == 1) View.VISIBLE else View.GONE
+                  adapter.notifyDataSetChanged()
+              }
+
+              private fun onItem(p: Int) {
+                  if (mode == 1) {
+                      if (p < plNames.size) openPlaylist(plNames[p])
+                  } else if (p < shown.size) {
+                      queue = ArrayList(shown)
+                      playAt(p)
+                  }
+              }
+
+              private fun onItemLong(p: Int) {
+                  if (mode == 0 && p < shown.size) {
+                      addToPlaylist(shown[p])
+                  } else if (mode == 1 && p < plNames.size) {
+                      val n = plNames[p]
+                      confirm("Apagar a playlist \"" + n + "\"?") {
+                          val o = loadPl()
+                          o.remove(n)
+                          savePl(o)
+                          refresh()
+                      }
+                  } else if (mode == 2 && p < shown.size) {
+                      val s = shown[p]
+                      confirm("Remover \"" + s.title + "\" desta playlist?") {
+                          removeFrom(curPl, s)
+                          openPlaylist(curPl)
+                      }
+                  }
+              }
+
+              private fun confirm(msg: String, ok: () -> Unit) {
+                  AlertDialog.Builder(this)
+                      .setMessage(msg)
+                      .setPositiveButton("Sim") { _, _ -> ok() }
+                      .setNegativeButton("Não", null)
+                      .show()
+              }
+
+              // ---------- playlists ----------
+
+              private fun loadPl(): JSONObject {
+                  return try {
+                      JSONObject(prefs.getString("pl", "{}") ?: "{}")
+                  } catch (e: Exception) {
+                      JSONObject()
+                  }
+              }
+
+              private fun savePl(o: JSONObject) {
+                  prefs.edit().putString("pl", o.toString()).apply()
+              }
+
+              private fun plSongs(name: String): List<Song> {
+                  val a = loadPl().optJSONArray(name) ?: return emptyList()
+                  val res = ArrayList<Song>()
+                  for (i in 0 until a.length()) {
+                      val id = a.getLong(i)
+                      val s = allSongs.firstOrNull { it.id == id }
+                      if (s != null) res.add(s)
+                  }
+                  return res
+              }
+
+              private fun addTo(name: String, song: Song) {
+                  val o = loadPl()
+                  val a = o.optJSONArray(name) ?: JSONArray()
+                  var has = false
+                  for (i in 0 until a.length()) if (a.getLong(i) == song.id) has = true
+                  if (!has) a.put(song.id)
+                  o.put(name, a)
+                  savePl(o)
+                  toast("Adicionada a \"" + name + "\"")
+              }
+
+              private fun removeFrom(name: String, song: Song) {
+                  val o = loadPl()
+                  val a = o.optJSONArray(name) ?: return
+                  val na = JSONArray()
+                  for (i in 0 until a.length()) if (a.getLong(i) != song.id) na.put(a.getLong(i))
+                  o.put(name, na)
+                  savePl(o)
+              }
+
+              private fun addToPlaylist(song: Song) {
+                  val names = loadPl().keys().asSequence().sorted().toList()
+                  val items = (names + "＋ Nova playlist").toTypedArray()
+                  AlertDialog.Builder(this)
+                      .setTitle("Adicionar à playlist")
+                      .setItems(items) { _, w ->
+                          if (w == names.size) newPlaylist(song) else addTo(names[w], song)
+                      }
+                      .show()
+              }
+
+              private fun newPlaylist(song: Song?) {
+                  val et = EditText(this)
+                  et.hint = "Nome da playlist"
+                  et.setSingleLine()
+                  et.setTextColor(Color.WHITE)
+                  et.setHintTextColor(Color.GRAY)
+                  AlertDialog.Builder(this)
+                      .setTitle("Nova playlist")
+                      .setView(et)
+                      .setPositiveButton("Criar") { _, _ ->
+                          val n = et.text.toString().trim()
+                          if (n.isNotEmpty()) {
+                              val o = loadPl()
+                              if (!o.has(n)) {
+                                  o.put(n, JSONArray())
+                                  savePl(o)
+                              }
+                              if (song != null) addTo(n, song)
+                              if (mode == 1) refresh()
+                          }
+                      }
+                      .setNegativeButton("Cancelar", null)
+                      .show()
+              }
+
+              // ---------- reprodução ----------
+
+              private fun playAt(i: Int) {
+                  if (i < 0 || i >= queue.size) return
+                  val s = queue[i]
+                  try {
+                      mp?.release()
+                      mp = null
+                      val m = MediaPlayer()
+                      m.setWakeMode(applicationContext, PowerManager.PARTIAL_WAKE_LOCK)
+                      m.setDataSource(applicationContext, s.uri())
+                      m.setOnCompletionListener { next() }
+                      m.setOnErrorListener { _, _, _ -> true }
+                      m.prepare()
+                      m.start()
+                      mp = m
+                      index = i
+                      showNow(s, m.duration)
+                  } catch (e: Exception) {
+                      toast("Não consegui tocar esta música")
+                  }
+              }
+
+              private fun showNow(s: Song, dur: Int) {
+                  titleTv.text = s.title
+                  artistTv.text = if (s.album.isNotBlank()) s.artist + "  •  " + s.album else s.artist
+                  seek.max = dur
+                  seek.progress = 0
+                  curTv.text = fmt(0)
+                  durTv.text = fmt(dur)
+                  playBtn.text = "❚❚"
+                  art.setImageDrawable(null)
+                  loadArt(s)
+              }
+
+              private fun loadArt(s: Song) {
+                  val uri = s.uri()
+                  Thread {
+                      var bmp: Bitmap? = null
+                      try {
+                          val r = MediaMetadataRetriever()
+                          r.setDataSource(applicationContext, uri)
+                          val b = r.embeddedPicture
+                          r.release()
+                          if (b != null) {
+                              val o = BitmapFactory.Options()
+                              o.inJustDecodeBounds = true
+                              BitmapFactory.decodeByteArray(b, 0, b.size, o)
+                              var ss = 1
+                              while (o.outWidth / ss > 1000) ss *= 2
+                              val o2 = BitmapFactory.Options()
+                              o2.inSampleSize = ss
+                              bmp = BitmapFactory.decodeByteArray(b, 0, b.size, o2)
+                          }
+                      } catch (e: Exception) {
+                      }
+                      if (bmp == null) {
+                          try {
+                              bmp = contentResolver.loadThumbnail(uri, Size(600, 600), null)
+                          } catch (e: Exception) {
+                          }
+                      }
+                      val result = bmp
+                      runOnUiThread {
+                          val cur = queue.getOrNull(index)
+                          if (cur != null && cur.id == s.id && result != null) art.setImageBitmap(result)
+                      }
+                  }.start()
+              }
+
+              private fun toggle() {
+                  val m = mp
+                  if (m == null) {
+                      if (queue.isEmpty()) queue = ArrayList(shown)
+                      if (queue.isNotEmpty()) playAt(if (index in queue.indices) index else 0)
+                      return
+                  }
+                  if (m.isPlaying) {
+                      m.pause()
+                      playBtn.text = "▶"
+                  } else {
+                      m.start()
+                      playBtn.text = "❚❚"
+                  }
+              }
+
+              private fun next() {
+                  if (queue.isEmpty()) return
+                  playAt((index + 1) % queue.size)
+              }
+
+              private fun prev() {
+                  if (queue.isEmpty()) return
+                  val m = mp
+                  if (m != null && m.currentPosition > 3000) {
+                      m.seekTo(0)
+                  } else {
+                      playAt((index - 1 + queue.size) % queue.size)
+                  }
+              }
+
+              private fun seekRel(ms: Int) {
+                  val m = mp ?: return
+                  val p = (m.currentPosition + ms).coerceIn(0, m.duration)
+                  m.seekTo(p)
+                  seek.progress = p
+                  curTv.text = fmt(p)
+              }
+          }
+          EOF
+
+      - name: Compilar APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Publicar APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk TsukiPlayer.apk
+          gh release create "v${{ github.run_number }}" TsukiPlayer.apk --title "Tsuki Player v${{ github.run_number }}" --notes "APK pronto para instalar."
