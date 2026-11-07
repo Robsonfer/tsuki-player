@@ -202,6 +202,7 @@ jobs:
           import android.view.ViewGroup
           import android.view.ViewOutlineProvider
           import android.widget.BaseAdapter
+          import android.widget.Button
           import android.widget.EditText
           import android.widget.FrameLayout
           import android.widget.ImageView
@@ -855,9 +856,13 @@ jobs:
                   val cur: Set<String> = prefs.getStringSet("folders", null)?.toSet() ?: emptySet()
                   val checked = BooleanArray(folders.size) { cur.isEmpty() || cur.contains(folders[it]) }
                   val names = folders.map { it.removePrefix("/storage/emulated/0/").ifEmpty { "(raiz)" } }.toTypedArray()
-                  AlertDialog.Builder(this)
+                  var nb: Button? = null
+                  val dlg = AlertDialog.Builder(this)
                       .setTitle("Pastas de música")
-                      .setMultiChoiceItems(names, checked) { _, i, v -> checked[i] = v }
+                      .setMultiChoiceItems(names, checked) { _, i, v ->
+                          checked[i] = v
+                          nb?.text = if (checked.all { it }) "Desmarcar todas" else "Marcar todas"
+                      }
                       .setPositiveButton("OK") { _, _ ->
                           val sel = HashSet<String>()
                           for (i in folders.indices) if (checked[i]) sel.add(folders[i])
@@ -870,7 +875,21 @@ jobs:
                           }
                       }
                       .setNegativeButton("Cancelar", null)
-                      .show()
+                      .setNeutralButton("Desmarcar todas", null)
+                      .create()
+                  dlg.show()
+                  val nbtn = dlg.getButton(AlertDialog.BUTTON_NEUTRAL)
+                  nb = nbtn
+                  nbtn.text = if (checked.all { it }) "Desmarcar todas" else "Marcar todas"
+                  // não fecha a janela ao tocar: marca ou desmarca todas as pastas de uma vez
+                  nbtn.setOnClickListener {
+                      val v = !checked.all { it }
+                      for (i in checked.indices) {
+                          checked[i] = v
+                          dlg.listView.setItemChecked(i, v)
+                      }
+                      nbtn.text = if (v) "Desmarcar todas" else "Marcar todas"
+                  }
               }
 
               private fun showSongs() {
