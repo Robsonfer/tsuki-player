@@ -65,6 +65,15 @@ jobs:
               namespace = "br.dev.rf.tsuki"
               compileSdk = 34
 
+              signingConfigs {
+                  getByName("debug") {
+                      storeFile = rootProject.file("tsuki.keystore")
+                      storePassword = "android"
+                      keyAlias = "androiddebugkey"
+                      keyPassword = "android"
+                  }
+              }
+
               defaultConfig {
                   applicationId = "br.dev.rf.tsuki"
                   minSdk = 29
@@ -92,6 +101,8 @@ jobs:
               <uses-permission android:name="android.permission.WAKE_LOCK" />
               <application
                   android:label="Tsuki Player"
+                  android:icon="@mipmap/ic_launcher"
+                  android:roundIcon="@mipmap/ic_launcher_round"
                   android:theme="@android:style/Theme.Material.NoActionBar">
                   <activity
                       android:name=".MainActivity"
@@ -106,6 +117,52 @@ jobs:
               </application>
           </manifest>
           EOF
+
+          mkdir -p app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26
+
+          cat > app/src/main/res/drawable/ic_launcher_background.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#0F0B1E" android:pathData="M0,0h108v108h-108z" />
+          </vector>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_launcher_foreground.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path android:fillColor="#2C2350" android:pathData="M54,54m-27,0a27,27 0,1 1,54 0a27,27 0,1 1,-54 0" />
+              <path android:fillColor="#00000000" android:strokeColor="#E889B5" android:strokeWidth="1.2" android:pathData="M54,54m-29.5,0a29.5,29.5 0,1 1,59 0a29.5,29.5 0,1 1,-59 0" />
+              <path android:fillColor="#E889B5" android:pathData="M22,32m-2.4,0a2.4,2.4 0,1 1,4.8 0a2.4,2.4 0,1 1,-4.8 0" />
+              <path android:fillColor="#E889B5" android:pathData="M86,78m-2.4,0a2.4,2.4 0,1 1,4.8 0a2.4,2.4 0,1 1,-4.8 0" />
+              <path android:fillColor="#8FD3E8" android:pathData="M30,86m-1.8,0a1.8,1.8 0,1 1,3.6 0a1.8,1.8 0,1 1,-3.6 0" />
+              <group android:rotation="45" android:pivotX="54" android:pivotY="54" android:scaleX="0.85" android:scaleY="0.85">
+                  <path android:fillColor="#F1F5FB" android:pathData="M50,68L50,24L54,14L54,68Z" />
+                  <path android:fillColor="#A9B8D0" android:pathData="M54,14L58,20L58,68L54,68Z" />
+                  <path android:fillColor="#D9B25F" android:pathData="M43,70a11,3 0,1 0,22 0a11,3 0,1 0,-22 0z" />
+                  <path android:fillColor="#6B4FA0" android:pathData="M51,72L57,72L57,92L51,92Z" />
+                  <path android:fillColor="#00000000" android:strokeColor="#E889B5" android:strokeWidth="1" android:pathData="M51,76L57,79M51,81L57,84M51,86L57,89" />
+                  <path android:fillColor="#D9B25F" android:pathData="M50.5,92L57.5,92L57.5,95L50.5,95Z" />
+              </group>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cp app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
           cat > app/src/main/java/br/dev/rf/tsuki/MainActivity.kt <<'EOF'
           package br.dev.rf.tsuki
@@ -167,12 +224,13 @@ jobs:
           class MainActivity : Activity() {
               private val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
               private val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
-              private val PINK = Color.parseColor("#FF5FA8")
-              private val CYAN = Color.parseColor("#5FE3FF")
+              private val PINK = Color.parseColor("#E889B5")
+              private val CYAN = Color.parseColor("#8FD3E8")
               private val BG = Color.parseColor("#0B0B14")
               private val PANEL = Color.parseColor("#17172A")
-              private val LILAC = Color.parseColor("#B9A7FF")
+              private val LILAC = Color.parseColor("#B9AEE6")
               private val GRAY = Color.parseColor("#8A86A8")
+              private val LINE = Color.parseColor("#6A5A92")
 
               private val allSongs = ArrayList<Song>()
               private var shown = ArrayList<Song>()
@@ -281,8 +339,34 @@ jobs:
                   val g = GradientDrawable()
                   g.setColor(color)
                   g.cornerRadius = dp(radius).toFloat()
-                  g.setStroke(dp(2), stroke)
+                  g.setStroke(Math.max(1, (1.5f * resources.displayMetrics.density).toInt()), stroke)
                   return g
+              }
+
+              private fun gradBox(c1: Int, c2: Int, stroke: Int, radius: Int): GradientDrawable {
+                  val g = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(c1, c2))
+                  g.cornerRadius = dp(radius).toFloat()
+                  g.setStroke(Math.max(1, (1.5f * resources.displayMetrics.density).toInt()), stroke)
+                  return g
+              }
+
+              private fun divider(): LinearLayout {
+                  val row = LinearLayout(this)
+                  row.orientation = LinearLayout.HORIZONTAL
+                  row.gravity = Gravity.CENTER_VERTICAL
+                  val l = View(this)
+                  l.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(Color.TRANSPARENT, LINE))
+                  val r = View(this)
+                  r.background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(LINE, Color.TRANSPARENT))
+                  val mid = TextView(this)
+                  mid.text = "✦"
+                  mid.setTextColor(PINK)
+                  mid.textSize = 10f
+                  mid.setPadding(dp(8), 0, dp(8), 0)
+                  row.addView(l, LinearLayout.LayoutParams(0, dp(1), 1f))
+                  row.addView(mid, LinearLayout.LayoutParams(WRAP, WRAP))
+                  row.addView(r, LinearLayout.LayoutParams(0, dp(1), 1f))
+                  return row
               }
 
               private fun btn(label: String, size: Float, click: () -> Unit): TextView {
@@ -310,7 +394,16 @@ jobs:
                   val root = LinearLayout(this)
                   root.orientation = LinearLayout.VERTICAL
                   root.setBackgroundColor(BG)
-                  root.setPadding(dp(14), dp(10), dp(14), dp(12))
+                  root.clipToPadding = false
+                  root.clipChildren = false
+                  root.setPadding(dp(14), dp(10), dp(14), dp(26))
+
+                  fun div(top: Int, bottom: Int) {
+                      val lp = LinearLayout.LayoutParams(MATCH, WRAP)
+                      lp.topMargin = dp(top)
+                      lp.bottomMargin = dp(bottom)
+                      root.addView(divider(), lp)
+                  }
 
                   val head = TextView(this)
                   head.text = "✦ ツキ・プレイヤー ✦"
@@ -320,14 +413,14 @@ jobs:
                   head.gravity = Gravity.CENTER
                   root.addView(head, LinearLayout.LayoutParams(MATCH, WRAP))
 
-                  // capa do álbum (cantos arredondados, sem sobrepor a moldura)
-                  val side = (resources.displayMetrics.widthPixels * 0.40).toInt()
+                  // capa do álbum
+                  val side = (resources.displayMetrics.widthPixels * 0.36).toInt()
                   val frame = FrameLayout(this)
-                  frame.background = box(PANEL, CYAN, 22)
+                  frame.background = gradBox(Color.parseColor("#1B1A2F"), Color.parseColor("#12121F"), CYAN, 22)
                   frame.setPadding(dp(6), dp(6), dp(6), dp(6))
                   val note = TextView(this)
                   note.text = "♪"
-                  note.textSize = 56f
+                  note.textSize = 52f
                   note.setTextColor(PINK)
                   note.gravity = Gravity.CENTER
                   frame.addView(note, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -345,6 +438,8 @@ jobs:
                   flp.topMargin = dp(8)
                   root.addView(frame, flp)
 
+                  div(8, 4)
+
                   titleTv = TextView(this)
                   titleTv.text = "Nenhuma música"
                   titleTv.setTextColor(Color.WHITE)
@@ -353,9 +448,7 @@ jobs:
                   titleTv.gravity = Gravity.CENTER
                   titleTv.maxLines = 1
                   titleTv.ellipsize = TextUtils.TruncateAt.END
-                  val tlp = LinearLayout.LayoutParams(MATCH, WRAP)
-                  tlp.topMargin = dp(8)
-                  root.addView(titleTv, tlp)
+                  root.addView(titleTv, LinearLayout.LayoutParams(MATCH, WRAP))
 
                   artistTv = TextView(this)
                   artistTv.text = "Toque em uma música da lista"
@@ -374,7 +467,9 @@ jobs:
                   infoTv.ellipsize = TextUtils.TruncateAt.END
                   root.addView(infoTv, LinearLayout.LayoutParams(MATCH, WRAP))
 
-                  // abas: músicas / playlists / pastas
+                  div(4, 8)
+
+                  // abas
                   val tabs = LinearLayout(this)
                   tabs.orientation = LinearLayout.HORIZONTAL
                   fun tab(b: TextView) {
@@ -385,9 +480,7 @@ jobs:
                   tab(btn("Músicas", 14f) { showSongs() })
                   tab(btn("Playlists", 14f) { showPlaylistsDialog() })
                   tab(btn("Pastas", 14f) { chooseFolders() })
-                  val tablp = LinearLayout.LayoutParams(MATCH, WRAP)
-                  tablp.topMargin = dp(10)
-                  root.addView(tabs, tablp)
+                  root.addView(tabs, LinearLayout.LayoutParams(MATCH, WRAP))
 
                   val sec = LinearLayout(this)
                   sec.orientation = LinearLayout.HORIZONTAL
@@ -405,23 +498,34 @@ jobs:
                   sec.addView(hint, LinearLayout.LayoutParams(WRAP, WRAP))
                   val seclp = LinearLayout.LayoutParams(MATCH, WRAP)
                   seclp.topMargin = dp(8)
+                  seclp.bottomMargin = dp(4)
                   root.addView(sec, seclp)
 
-                  // lista de músicas (ocupa o espaço do meio)
+                  // lista dentro de uma caixinha
                   list = ListView(this)
                   list.adapter = adapter
-                  list.divider = ColorDrawable(Color.parseColor("#26263D"))
+                  list.divider = ColorDrawable(Color.parseColor("#26233F"))
                   list.dividerHeight = 1
                   list.setOnItemClickListener { _, _, p, _ -> onItem(p) }
                   list.setOnItemLongClickListener { _, _, p, _ ->
                       onItemLong(p)
                       true
                   }
-                  val llp = LinearLayout.LayoutParams(MATCH, 0, 1f)
-                  llp.topMargin = dp(4)
-                  root.addView(list, llp)
+                  val card = FrameLayout(this)
+                  card.background = gradBox(Color.parseColor("#16152B"), Color.parseColor("#0F0F1E"), Color.parseColor("#34305A"), 18)
+                  card.setPadding(dp(4), dp(6), dp(4), dp(6))
+                  card.outlineProvider = object : ViewOutlineProvider() {
+                      override fun getOutline(v: View, o: Outline) {
+                          o.setRoundRect(0, 0, v.width, v.height, dp(18).toFloat())
+                      }
+                  }
+                  card.clipToOutline = true
+                  card.addView(list, FrameLayout.LayoutParams(MATCH, MATCH))
+                  root.addView(card, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
-                  // barra de tempo + controles (embaixo, perto do polegar)
+                  div(8, 2)
+
+                  // barra de tempo + controles
                   seek = SeekBar(this)
                   seek.progressTintList = ColorStateList.valueOf(PINK)
                   seek.thumbTintList = ColorStateList.valueOf(CYAN)
@@ -440,9 +544,7 @@ jobs:
                           mp?.seekTo(seek.progress)
                       }
                   })
-                  val sklp = LinearLayout.LayoutParams(MATCH, WRAP)
-                  sklp.topMargin = dp(6)
-                  root.addView(seek, sklp)
+                  root.addView(seek, LinearLayout.LayoutParams(MATCH, WRAP))
 
                   val times = LinearLayout(this)
                   times.orientation = LinearLayout.HORIZONTAL
@@ -460,18 +562,22 @@ jobs:
                   val ctr = LinearLayout(this)
                   ctr.orientation = LinearLayout.HORIZONTAL
                   fun add(b: TextView) {
-                      val lp = LinearLayout.LayoutParams(0, dp(58), 1f)
-                      lp.setMargins(dp(3), 0, dp(3), 0)
+                      val lp = LinearLayout.LayoutParams(0, dp(56), 1f)
+                      lp.setMargins(dp(3), dp(2), dp(3), dp(2))
                       ctr.addView(b, lp)
                   }
                   add(btn("|◀", 17f) { prev() })
                   add(btn("«10s", 14f) { seekRel(-10000) })
                   playBtn = btn("▶", 22f) { toggle() }
+                  val pg = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(PINK, Color.parseColor("#A98BE0")))
+                  pg.cornerRadius = dp(16).toFloat()
+                  playBtn.background = pg
+                  playBtn.setTextColor(BG)
                   add(playBtn)
                   add(btn("10s»", 14f) { seekRel(10000) })
                   add(btn("▶|", 17f) { next() })
                   val clp = LinearLayout.LayoutParams(MATCH, WRAP)
-                  clp.topMargin = dp(8)
+                  clp.topMargin = dp(6)
                   root.addView(ctr, clp)
 
                   setContentView(root)
